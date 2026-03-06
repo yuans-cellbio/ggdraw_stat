@@ -1,0 +1,381 @@
+---
+title: Label statistical difference by modifying ggplot objects.
+author:
+  - name: Shuai Yuan
+    url: https://www.straublab.pitt.edu/lab/
+    affiliation: University of Pittsburgh
+    email: yuans@pitt.edu
+date: '`r format(Sys.Date(), "%Y-%m-%d")`'
+output: 
+  html_document:
+    toc: true
+    toc_float: false
+    toc_depth: 5
+    number_sections: true
+    self_contained: yes
+---
+
+```{r setup, echo = FALSE}
+options(
+  htmltools.dir.version = FALSE, 
+  knitr.duplicate.label = "allow"
+  )
+knitr::opts_chunk$set(
+  dpi = 300, 
+  out.width = "100%",
+  cache = FALSE,
+  echo = TRUE,
+  message = FALSE, 
+  warning = FALSE,
+  hiline = TRUE
+  )
+```
+
+```{r}
+library(glue)
+library(tidyverse)
+library(patchwork)
+
+library(emmeans)
+
+source("ggplot_draw_stat.R")
+
+# Define ggplot theme
+theme_yuan <- function(baseFontSize = 8, baseLineWidth = 0.5) {
+  font <- "sans"
+  
+  theme_classic() %+replace%
+    
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      
+      axis.title = element_text(
+        family = font,
+        face = "bold",
+        size = baseFontSize
+      ),
+      
+      axis.text = element_text(
+        family = font,
+        face = "bold",
+        size = baseFontSize * 1
+      ),
+      
+      legend.title = element_text(
+        family = font,
+        face = "bold",
+        size = baseFontSize
+      ),
+      
+      legend.text = element_text(
+        family = font,
+        face = "bold",
+        size = baseFontSize * 1
+      ),
+      
+      axis.line = element_line(color = "black", linewidth = baseLineWidth),
+      axis.ticks = element_line(color = "black", linewidth = baseLineWidth),
+      axis.ticks.length = unit(baseLineWidth * 2, "mm"), 
+      
+      strip.background = element_blank(), 
+      strip.placement = "outside", 
+      strip.text = element_text(face = "bold", size = baseFontSize)
+    )
+}
+```
+
+# **Introduction**
+
+
+# **Simulation Data**
+
+We simulate data with three grouping variables, `Fct1`, `Fct2`, and `Fct3` to mimic a complicated design of biological experiment. The three variables need to be factors. 
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+n <- 3
+
+# Fct1 and Fct2 are two independent biological factors
+fct1_levels <- LETTERS[1:3]
+fct2_levels <- letters[1:3]
+
+# Fct3 is a factor of different measurements to be stratified for statistical analysis and plotting. 
+fct3_levels <- map_chr(1:4, ~LETTERS[sample(1:26, 4)] %>% str_c(collapse = ""))
+
+df_data <- data.frame(
+  Sample = str_c("S", 1:(length(fct1_levels)*length(fct2_levels)*n)) %>%
+    rep(times = length(fct3_levels)), 
+  Fct1 = rep(fct1_levels, each = length(fct2_levels)*n) %>%
+    rep(times = length(fct3_levels)) %>%
+    factor(levels = fct1_levels), 
+  Fct2 = rep(fct2_levels, times = length(fct1_levels)*n) %>%
+    rep(times = length(fct3_levels)) %>% 
+    factor(levels = fct2_levels), 
+  Fct3 = rep(fct3_levels, each = length(fct1_levels)*length(fct2_levels)*n) %>%
+    factor(levels = fct3_levels)
+)
+
+# Convert factor levels to numeric values
+df_data <- df_data %>%
+  mutate(
+    Fct1_num = as.numeric(Fct1), 
+    Fct2_num = as.numeric(Fct2), 
+    Fct3_num = as.numeric(Fct3), 
+    Fct1_num = Fct1_num - mean(Fct1_num), # Shift the parabola curve to simulate a potential biphasic effect. 
+    Fct2_num = Fct2_num - mean(Fct2_num)
+  )
+
+# Simulate data for each measurement. 
+
+# Define the fixed intercept
+# The intercept is set positive as most biological measurements are positive.
+a0 <- abs(rnorm(length(fct3_levels), 1, 1))
+
+# Define the coefficients for Fct1
+b1 <- rnorm(length(fct3_levels), 1)
+c1 <- rnorm(length(fct3_levels), 1)
+
+# Define the coeeficients for Fct2
+b2 <- rnorm(length(fct3_levels), 1)
+c2 <- rnorm(length(fct3_levels), 1)
+
+df_data <- df_data %>%
+  mutate(
+    Value = a0[Fct3_num] + # Intercept
+      (b1[Fct3_num]*Fct1_num + c1[Fct3_num]*Fct1_num^2) * # Fct1 effect
+      # We allow interaction between Fct1 and Fct2 effects. 
+      (b2[Fct3_num]*Fct2_num + c2[Fct3_num]*Fct2_num^2) # Fct2 effect
+  ) %>%
+  group_by(Fct3) %>%
+  mutate(
+    # Offset simulated values because most biological measurements are positive.
+    Value = Value - min(Value), 
+    # Add error based on mean values so that groups have equal variances. 
+    Value = Value + rnorm(n(), sd = mean(Value) * 0.2), 
+    Value = Value - min(Value)
+  ) %>%
+  select(!contains("_num"))
+
+# Offset simulated values because most biological measurements are positive. 
+min_value <- min(df_data$Value)
+
+if (min_value < 0) df_data$Value <- df_data$Value - min_value
+
+df_data %>%
+  group_by(Fct3) %>%
+  slice_head(n=3)
+```
+
+# **Statistical Tests**
+
+The data is simulated to have differences between groups. Here we use ANOVA and Tukey's post-hoc tests to find out the differences. The result is saved in a dataframe with columns `Group1`, `Group1`, and `Label`. 
+
+`Group1` and `Group2` must match the variables mapped to `x` or the ineraction of `x` and `group.` 
+
+`main_geom_idx` is the index of geom used to retrieve the `x` values of each group. 
+
+```{r}
+# Statistical tests
+df_stat <- df_data %>% 
+  group_by(Fct3) %>%
+  nest() %>%
+  mutate(
+    m = map(data, ~aov(Value~Fct1*Fct2, data = .x)), 
+    m.pvalue = map(m, function(x){
+      x <- summary(x)
+      pvalues <- x[[1]]$`Pr(>F)`
+      data.frame(
+        Fct1.pvalue = pvalues[1], 
+        Fct2.pvalue = pvalues[2], 
+        Fct1.Fct2.pvalue = pvalues[3]
+      )
+    })
+  ) %>%
+  unnest(m.pvalue) %>%
+  filter(
+    any(across(contains(".pvalue"), ~.x<0.05)) # We only keep a model if there is any significance. 
+  ) %>%
+  mutate(
+    post.hoc.pvalue = map(m, function(x){
+      emm <- emmeans(x, ~Fct1*Fct2)
+      df_pvalues <- summary(contrast(emm, "pairwise", adjust = "tukey")) %>%
+        select(contrast, p.value) # We only care about contrast and p-values.
+    })
+  ) %>%
+  select(Fct3, post.hoc.pvalue) %>% # We can remove unwanted data before unnesting to save memory. 
+  unnest(post.hoc.pvalue) %>%
+  filter(p.value < 0.05) %>% # We only keep significant comparisons.
+  ungroup()
+
+df_stat <- df_stat %>%
+  mutate(
+    Group1 = map_chr(contrast, ~str_split_1(.x, " - ") %>% first()),
+    Group2 = map_chr(contrast, ~str_split_1(.x, " - ") %>% last()), 
+    Label = ifelse(p.value<0.05, "*", "")
+  ) %>%
+  # filter(Fct3 == levels(Fct3)[1]) %>%
+  filter(map2_vec(Group1, Group2, ~length(intersect(str_split_1(.x, " "), str_split_1(.y, " "))) > 0))
+
+ df_stat %>%
+  group_by(Fct3) %>%
+  slice_head(n=3)
+```
+
+
+# **Plots**
+
+## Single panel, x == group
+
+In a simple experiment, we may only have one grouping variable, such as `Treatment` with different levels. For such experimental designs, we can simply use `x = Treatment`. Let's pretend the interaction of Fct1 and Fct2 is the treatment variable. 
+
+```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
+p <- df_data %>%
+  filter(Fct3 == levels(Fct3)[1]) %>%
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value)) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~Fct3, scale = "free", strip.position = "left") +
+  theme_yuan()
+
+p
+```
+
+To draw the statistics, we can simply modify the ggplot object `p` with `draw_stat`. Note that the an additional variable "comp_group" is passed to ggplot. It contains group names matching to `Group1` and `Group2` in df_stat. The variable name can be change by the argument `contrast_group_name`. 
+
+```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
+p <- df_data %>%
+  filter(Fct3 == levels(Fct3)[1]) %>%
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  theme_yuan()
+
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.05)
+```
+
+
+Note that the coordinates for segments and labels are calculated based on a main geom or stat layer declared by `main_geom_idx`, which contains the exact x position of an individual group. If there are a range of x values for data in the same group, there may be unexpected results.  
+
+```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
+p <- df_data %>%
+  filter(Fct3 == levels(Fct3)[1]) %>%
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  # geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  ggbeeswarm::geom_quasirandom() +
+  scale_fill_brewer(palette = "Set1") +
+  theme_yuan()
+
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.05, main_geom_idx = 3)
+```
+
+
+## Single panel, x = Fct1, group = Fct2
+
+In a more complicated experimental design, we may have two variables such as `Treatment` and `Genotype`, each with multiple levels. Let's pretend `Fct1` is `Treatment`, and `Fct2` is `Genotype`. 
+
+```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
+p <- df_data %>%
+  filter(Fct3 == levels(Fct3)[1]) %>%
+  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  theme_yuan()
+
+
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.1)
+```
+
+## Multiple panels, x == group
+
+Now let's add multiple panels. Here, we use Fct3 as the facet variable. Think it as measuring different mRNA expression with the same experimental groups. 
+
+```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
+p <- df_data %>%
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value,comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~Fct3, scale = "free", strip.position = "left") +
+  theme_yuan()
+
+draw_stat(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.05)
+```
+
+
+## Multiple panels, x = Fct1, group = Fct2
+
+```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
+p <- df_data %>%
+  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~Fct3, scale = "free", strip.position = "left") +
+  theme_yuan()
+
+draw_stat(p, df_stat, contrast_group_name = "comp_group")
+```
+
+## What if we use multiple variable for facet?
+
+Multiple facet variables are not supported for now. 
+
+```{r fig.width=4, fig.height=2, out.width=glue("{4*96}px"), error=TRUE}
+p <- df_data %>%
+  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~Fct2+Fct3, scale = "free", strip.position = "left") +
+  theme_yuan()
+
+draw_stat(p, df_stat, contrast_group_name = "comp_group")
+```
+
+# **Additional Notes**
+
+`draw_stat` is a wrapper function calling `get_annotation_df` to calculate annotation coordinates. The user can call this function directly for more flexibility. 
+
+```{r}
+p <- df_data %>%
+  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
+  stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
+  geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~Fct3, scale = "free", strip.position = "left") +
+  theme_yuan()
+
+df_annot_tbl <- get_annotation_df(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.5)
+head(df_annot_tbl)
+```
+
+
+```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
+segment_x_pad <- 0.02
+p + 
+  geom_segment(data = df_annot_tbl, aes(x = Group1.x+segment_x_pad, y = ymax_adj, xend = Group2.x-segment_x_pad, yend = ymax_adj), linewidth = 0.5, inherit.aes = FALSE) +
+  geom_segment(data = df_annot_tbl, aes(x = Group1.x+segment_x_pad, y = Group1.y_adj, xend = Group1.x+segment_x_pad, yend = ymax_adj), linewidth = 0.5, inherit.aes = FALSE) +
+  geom_segment(data = df_annot_tbl, aes(x = Group2.x-segment_x_pad, y = Group2.y_adj, xend = Group2.x-segment_x_pad, yend = ymax_adj), linewidth = 0.5, inherit.aes = FALSE)+
+  geom_text(data = df_annot_tbl, aes(x = mid.x_adj, y = ymax_adj+ypad*0.6, label = glue("p={formatC(p.value, digits = 2, format = 'e')}")), size = 8, hjust = 0, size.unit = "pt", color = "red",  inherit.aes = FALSE) +
+  coord_cartesian(clip = "off") +
+  theme(
+    panel.spacing.x = unit(5, "mm")
+  )
+```
+
+
+
