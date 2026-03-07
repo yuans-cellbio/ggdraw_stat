@@ -219,7 +219,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
     if (!"ymax" %in% names(d)) d$ymax <- NA_real_
     d %>%
       mutate(geom_idx = i) %>%
-      select(geom_idx, any_of(contrast_group_name), PANEL, x, y, xmin, xmax, ymin, ymax)
+      select(geom_idx, any_of(c(contrast_group_name, "PANEL", "x", "y", "xmin", "xmax", "ymin", "ymax")))
   })
 
   # Coalesce ymax: use ymax where available, fall back to y.
