@@ -5,7 +5,7 @@ require(tidyverse)
 # Make a function to determine assign group indices by whether line intervals overlap.
 get_overlapping_groups <- function(x1, x2) {
   # x1 and x2 are two numeric vectors with equal lengths for two groups' x coordinates.
-
+  
   if (length(x1) == 1) return(1)
   # x1 may not be smaller than x2. We need to arrange them.
   # We store starts and ends in a dataframe to keep track of their indices
@@ -14,15 +14,15 @@ get_overlapping_groups <- function(x1, x2) {
     starts = pmin(x1, x2),
     ends = pmax(x1, x2)
   )
-
+  
   # We order by starts and ends so that starts[i] >= starts[i-1]
   df_interval <- df_interval %>%
     arrange(starts, ends)
-
+  
   # Initialize group indices.
   df_interval$group <- 1
   overlapping_interval_max <- df_interval$ends[1]
-
+  
   for (i in 2:nrow(df_interval)) {
     if (df_interval$starts[i] <= overlapping_interval_max) {
       overlapping_interval_max <- max(df_interval$ends[i], overlapping_interval_max)
@@ -31,10 +31,10 @@ get_overlapping_groups <- function(x1, x2) {
       df_interval$group[i] <- df_interval$group[i - 1] + 1
     }
   }
-
+  
   df_interval <- df_interval %>%
     arrange(index)
-
+  
   return(df_interval$group)
 }
 
@@ -46,11 +46,11 @@ nudge_y <- function(x, pad) {
     warning("Non-finite values detected in nudge_y input. Returning x unchanged.")
     return(x)
   }
-
+  
   for (i in 2:length(x)) {
     if (x[i] - x[i - 1] < pad[i]) x[i] <- x[i - 1] + pad[i]
   }
-
+  
   return(x)
 }
 
@@ -58,9 +58,9 @@ nudge_x <- function(x, a, b, z, panel_names, pb_data, main_geom_idx = 1, toleran
   # `mid.x` is passed to x.
   # Group1.x and Group2.x are passed to a and b.
   # ymax_adj is passed to z.
-
+  
   if (length(x) == 1) return(x)
-
+  
   if (is.null(panel_names)) {
     xs <- unique(c(a, b))
     for (i in 1:length(x)) {
@@ -128,20 +128,23 @@ find_adjacent_x <- function(mid.x, current_panel_name = NULL, pb_data, main_geom
 # Facet detection ---------------------------------------------------------
 
 # Retrieve facet variable names from a ggplot object.
-# Supports facet_wrap (single or multiple variables) and facet_grid.
+# Supports facet_wrap (single or multiple variables) and facet_grid,
+# including subclasses such as ggh4x::facet_wrap2 / facet_grid2.
 get_facet_var_names <- function(p) {
-  facet_class <- class(p$facet)[1]
-
-  if (facet_class == "FacetNull") {
+  facet <- p$facet
+  
+  if (inherits(facet, "FacetNull")) {
     return(NULL)
-  } else if (facet_class == "FacetWrap") {
-    return(map_chr(p$facet$params$facets, rlang::as_label))
-  } else if (facet_class == "FacetGrid") {
-    row_vars <- map_chr(p$facet$params$rows, rlang::as_label)
-    col_vars <- map_chr(p$facet$params$cols, rlang::as_label)
+  } else if (inherits(facet, "FacetWrap")) {
+    # Covers FacetWrap and subclasses (e.g., ggh4x::FacetWrap2)
+    return(map_chr(facet$params$facets, rlang::as_label))
+  } else if (inherits(facet, "FacetGrid")) {
+    # Covers FacetGrid and subclasses (e.g., ggh4x::FacetGrid2)
+    row_vars <- map_chr(facet$params$rows, rlang::as_label)
+    col_vars <- map_chr(facet$params$cols, rlang::as_label)
     return(c(row_vars, col_vars))
   } else {
-    warning("Unrecognized facet class: ", facet_class, ". Proceeding without facet support.")
+    warning("Unrecognized facet class: ", class(facet)[1], ". Proceeding without facet support.")
     return(NULL)
   }
 }
@@ -165,7 +168,7 @@ validate_inputs <- function(p, contrast_df, contrast_group_name, main_geom_idx) 
   if (length(missing_cols) > 0) {
     stop("contrast_df is missing required columns: ", paste(missing_cols, collapse = ", "))
   }
-
+  
   # Check that contrast_group_name exists in ggplot aesthetics
   pb <- ggplot_build(p)
   if (!contrast_group_name %in% names(pb$data[[1]])) {
@@ -175,13 +178,13 @@ validate_inputs <- function(p, contrast_df, contrast_group_name, main_geom_idx) 
       "Ensure it is mapped in aes() of the ggplot call."
     )
   }
-
+  
   # Check main_geom_idx is within range
   n_layers <- length(p$layers)
   if (main_geom_idx < 1 || main_geom_idx > n_layers) {
     stop("main_geom_idx (", main_geom_idx, ") is out of range. Plot has ", n_layers, " layer(s).")
   }
-
+  
   invisible(TRUE)
 }
 
@@ -199,39 +202,42 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
   # `contrast_group_name` is the name of the aesthetic in aes() that stores contrast group names.
   # `ypad_ratio` controls vertical padding between annotation segments.
   # `tolerance` is used for floating-point comparisons and label nudging.
-
+  
   validate_inputs(p, contrast_df, contrast_group_name, main_geom_idx)
-
+  
   # Retrieve data passed to ggplot.
   df_p_data <- p$data
-
+  
   # Retrieve facet variable names (supports multi-variable facets).
   facet_var_names <- get_facet_var_names(p)
   has_facet <- !is.null(facet_var_names)
-
+  
   # Build the plot to extract computed coordinates.
   pb <- ggplot_build(p)
-
+  
   # Assemble built data across all layers.
   # Use any_of() for safe column selection — not all layers have all columns.
   df_pb_data <- imap_dfr(pb$data, function(d, i) {
-    if (!"ymin" %in% names(d)) d$ymin <- NA_real_
-    if (!"ymax" %in% names(d)) d$ymax <- NA_real_
     d %>%
       mutate(geom_idx = i) %>%
       select(geom_idx, any_of(c(contrast_group_name, "PANEL", "x", "y", "xmin", "xmax", "ymin", "ymax")))
   })
-
+  
+  # Ensure y, ymin, ymax columns exist (some layers may lack them).
+  if (!"y" %in% names(df_pb_data)) df_pb_data$y <- NA_real_
+  if (!"ymin" %in% names(df_pb_data)) df_pb_data$ymin <- NA_real_
+  if (!"ymax" %in% names(df_pb_data)) df_pb_data$ymax <- NA_real_
+  
   # Coalesce ymax: use ymax where available, fall back to y.
   df_pb_data <- df_pb_data %>%
     mutate(ymax = ifelse(is.na(ymax), y, ymax))
-
+  
   # Map PANEL indices to panel names for faceted plots.
   if (has_facet) {
     panel_map <- build_panel_map(pb, facet_var_names)
     df_pb_data <- df_pb_data %>%
       left_join(panel_map, by = "PANEL")
-
+    
     # Build a composite facet column in contrast_df to match panel_name.
     if (length(facet_var_names) == 1) {
       contrast_df$panel_name <- as.character(contrast_df[[facet_var_names]])
@@ -241,7 +247,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       )
     }
   }
-
+  
   # Validate that Group1/Group2 values exist in the built data.
   available_groups <- unique(df_pb_data[[contrast_group_name]])
   bad_g1 <- setdiff(unique(contrast_df$Group1), available_groups)
@@ -260,17 +266,17 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
     warning("No valid contrasts remain after filtering. Returning empty annotation dataframe.")
     return(tibble())
   }
-
+  
   # Calculate x and y coordinates for each contrast.
   cgn <- contrast_group_name # shorthand for tidy eval
-
+  
   # Helper: safe max that returns NA instead of -Inf for empty input.
   safe_max <- function(x) {
     x <- x[is.finite(x)]
     if (length(x) == 0) return(NA_real_)
     max(x)
   }
-
+  
   if (has_facet) {
     # Use a loop approach to avoid .data ambiguity inside rowwise + nested filter.
     stat_rows <- vector("list", nrow(contrast_df))
@@ -279,7 +285,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       cur_panel <- row$panel_name
       cur_g1 <- row$Group1
       cur_g2 <- row$Group2
-
+      
       g1x <- df_pb_data %>% filter(geom_idx == main_geom_idx, !!sym(cgn) == cur_g1) %>% pull(x) %>% mean(na.rm = TRUE)
       g2x <- df_pb_data %>% filter(geom_idx == main_geom_idx, !!sym(cgn) == cur_g2) %>% pull(x) %>% mean(na.rm = TRUE)
       g1y <- df_pb_data %>% filter(panel_name == cur_panel, !!sym(cgn) == cur_g1) %>% pull(ymax) %>% safe_max()
@@ -290,7 +296,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
           x >= min(g1x, g2x) - tolerance,
           x <= max(g1x, g2x) + tolerance
         ) %>% pull(ymax) %>% safe_max()
-
+      
       stat_rows[[ri]] <- row %>% mutate(
         Group1.x = g1x, Group2.x = g2x,
         Group1.y = g1y, Group2.y = g2y,
@@ -316,7 +322,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       ) %>%
       ungroup()
   }
-
+  
   # Guard against NA/NaN/-Inf from empty filter results.
   df_stat <- df_stat %>%
     filter(
@@ -324,26 +330,21 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       is.finite(Group1.y), is.finite(Group2.y),
       is.finite(ymax)
     )
-
+  
   if (nrow(df_stat) == 0) {
     warning("All contrasts produced non-finite coordinates. Returning empty annotation dataframe.")
     return(tibble())
   }
-
+  
   # Retrieve y ranges per panel for padding calculation.
-  # panel_scales_y may have fewer entries than panels when scales are shared (facet_grid default).
-  # Use the layout's SCALE_Y column to map panels to their y-scale index.
-  layout <- pb$layout$layout
-  y_ranges <- map_dbl(pb$layout$panel_scales_y, function(s) {
-    diff(range(s$range$range, na.rm = TRUE))
-  })
-
+  # panel_scales_y reflects the *scale* range, which is shared across panels when
+  # scales are not free (facet_grid default, facet_wrap without scales="free").
+  # Instead, compute per-panel y-range from the actual built data for accurate padding.
   if (has_facet) {
-    # Build a named vector: panel_name -> y_range
-    panel_y_range <- setNames(
-      y_ranges[layout$SCALE_Y],
-      apply(layout[, facet_var_names, drop = FALSE], 1, paste, collapse = " | ")
-    )
+    panel_y_range <- df_pb_data %>%
+      group_by(panel_name) %>%
+      summarise(y_range = max(ymax, na.rm = TRUE) - min(c(y, ymin), na.rm = TRUE), .groups = "drop") %>%
+      deframe()
     df_stat <- df_stat %>%
       group_by(panel_name) %>%
       mutate(
@@ -352,20 +353,21 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       ) %>%
       ungroup()
   } else {
+    y_range_global <- max(df_pb_data$ymax, na.rm = TRUE) - min(c(df_pb_data$y, df_pb_data$ymin), na.rm = TRUE)
     df_stat <- df_stat %>%
       mutate(
         overlapping_group = get_overlapping_groups(Group1.x, Group2.x),
-        ypad = y_ranges[1] * ypad_ratio
+        ypad = y_range_global * ypad_ratio
       )
   }
-
+  
   # Group for vertical stacking.
   if (has_facet) {
     df_stat <- df_stat %>% group_by(panel_name, overlapping_group)
   } else {
     df_stat <- df_stat %>% group_by(overlapping_group)
   }
-
+  
   df_stat <- df_stat %>%
     arrange(ymax, abs(Group1.x - Group2.x), .by_group = TRUE) %>%
     mutate(
@@ -374,7 +376,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
       Group2.y_adj = Group2.y + ypad
     ) %>%
     ungroup()
-
+  
   # Nudge label x to avoid crossing vertical segments.
   if (has_facet) {
     df_stat <- df_stat %>%
@@ -397,7 +399,7 @@ get_annotation_df <- function(p, contrast_df, main_geom_idx = 1, contrast_group_
         )
       )
   }
-
+  
   return(df_stat)
 }
 
@@ -414,12 +416,12 @@ draw_stat <- function(p, contrast_df, main_geom_idx = 1, contrast_group_name,
     ypad_ratio = ypad_ratio,
     tolerance = tolerance
   )
-
+  
   if (nrow(df_stat_annot) == 0) {
     message("No annotations to draw.")
     return(p)
   }
-
+  
   p +
     geom_segment(
       data = df_stat_annot,
@@ -439,6 +441,6 @@ draw_stat <- function(p, contrast_df, main_geom_idx = 1, contrast_group_name,
     geom_text(
       data = df_stat_annot,
       aes(x = mid.x_adj, y = ymax_adj, label = Label),
-      size = label_size, color = label_color, inherit.aes = FALSE
+      size = label_size, color = label_color, hjust = 0.5, vjust = -0.5, inherit.aes = FALSE
     )
 }
