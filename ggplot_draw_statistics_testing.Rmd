@@ -89,6 +89,7 @@ theme_yuan <- function(baseFontSize = 8, baseLineWidth = 0.5) {
 
 `draw_stat` adds statistical comparison annotations (bracket + label) to ggplot bar/point/errorbar plots by extracting coordinates from the built ggplot object. Key features:
 
+- **No special aesthetic required**: group positions are resolved from `contrast_vars` — the column names in the plot data that define the contrast groups — eliminating the need for a `comp_group` mapping in `aes()`.
 - Works with single or grouped x-axis variables.
 - Supports `facet_wrap` and `facet_grid`, including **multiple facet variables**.
 - Input validation with informative error messages.
@@ -180,7 +181,7 @@ df_data %>%
 
 The data is simulated to have differences between groups. Here we use ANOVA and Tukey's post-hoc tests to find out the differences. The result is saved in a dataframe with columns `Group1`, `Group2`, and `Label`. 
 
-`Group1` and `Group2` must match the values of the aesthetic specified by `contrast_group_name`.
+`Group1` and `Group2` must match the values produced by `interaction(contrast_vars, sep = sep)` — i.e., the same labels that would result from pasting the contrast variable values together.
 
 `main_geom_idx` is the index of the geom/stat layer used to retrieve the `x` positions of each group. 
 
@@ -252,19 +253,19 @@ p <- df_data %>%
 p
 ```
 
-To draw the statistics, we can simply modify the ggplot object `p` with `draw_stat`. Note that an additional aesthetic `comp_group` is mapped in `aes()`. It contains group names matching `Group1` and `Group2` in `df_stat`. The aesthetic name is specified via the `contrast_group_name` argument. 
+To draw the statistics, we simply modify the ggplot object `p` with `draw_stat`. Instead of adding a special aesthetic, we pass `contrast_vars = c("Fct1", "Fct2")` - the column names whose interaction produces the `Group1`/`Group2` labels in `df_stat`. The function resolves x-positions internally from the built plot data.
 
 ```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
 p <- df_data %>%
   filter(Fct3 == levels(Fct3)[1]) %>%
-  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
   scale_fill_brewer(palette = "Set1") +
   theme_yuan()
 
-draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.05)
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05)
 ```
 
 
@@ -273,7 +274,7 @@ Note that the coordinates for segments and labels are calculated based on a main
 ```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
 p <- df_data %>%
   filter(Fct3 == levels(Fct3)[1]) %>%
-  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   # geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -281,7 +282,7 @@ p <- df_data %>%
   scale_fill_brewer(palette = "Set1") +
   theme_yuan()
 
-draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.05, main_geom_idx = 3)
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05, main_geom_idx = 3)
 ```
 
 
@@ -292,7 +293,7 @@ In a more complicated experimental design, we may have two variables such as `Tr
 ```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
 p <- df_data %>%
   filter(Fct3 == levels(Fct3)[1]) %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -300,7 +301,7 @@ p <- df_data %>%
   theme_yuan()
 
 
-draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_group_name = "comp_group", ypad_ratio = 0.1)
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
 ## Multiple panels, x == group
@@ -309,7 +310,7 @@ Now let's add multiple panels. Here, we use Fct3 as the facet variable. Think of
 
 ```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
 p <- df_data %>%
-  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = interaction(Fct1, Fct2, sep = " "), y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -317,7 +318,7 @@ p <- df_data %>%
   facet_wrap(~Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.05)
+draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05)
 ```
 
 
@@ -325,7 +326,7 @@ draw_stat(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.05)
 
 ```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
 p <- df_data %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -333,7 +334,7 @@ p <- df_data %>%
   facet_wrap(~Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group")
+draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"))
 ```
 
 ## Multiple facet variables with `facet_wrap`
@@ -356,7 +357,7 @@ df_stat_multi <- df_stat %>%
   select(-Fct2_g1, -Fct2_g2)
 
 p <- df_data %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", aes(fill = Fct1), fun = "mean", color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(size = 1, position = position_dodge(0.8)) +
@@ -364,7 +365,7 @@ p <- df_data %>%
   facet_wrap(~Fct2 + Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-draw_stat(p, df_stat_multi, contrast_group_name = "comp_group", ypad_ratio = 0.1)
+draw_stat(p, df_stat_multi, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
 ## Multiple facet variables with `facet_grid`
@@ -373,7 +374,7 @@ The function also supports `facet_grid`. The same requirement applies: `contrast
 
 ```{r fig.width=10, fig.height=6, out.width=glue("{10*96}px")}
 p <- df_data %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", aes(fill = Fct1), fun = "mean", color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(size = 1, position = position_dodge(0.8)) +
@@ -381,7 +382,7 @@ p <- df_data %>%
   facet_grid(Fct2 ~ Fct3, scales = "free_y") +
   theme_yuan()
 
-draw_stat(p, df_stat_multi, contrast_group_name = "comp_group", ypad_ratio = 0.1)
+draw_stat(p, df_stat_multi, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
 
@@ -391,7 +392,7 @@ draw_stat(p, df_stat_multi, contrast_group_name = "comp_group", ypad_ratio = 0.1
 
 ```{r fig.width=7, fig.height=4.5, out.width=glue("{7*96}px")}
 p <- df_data %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -399,7 +400,7 @@ p <- df_data %>%
   facet_wrap(~Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group",
+draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"),
           segment_linewidth = 0.3, label_size = 4, label_color = "red")
 ```
 
@@ -410,7 +411,7 @@ draw_stat(p, df_stat, contrast_group_name = "comp_group",
 
 ```{r}
 p <- df_data %>%
-  ggplot(aes(x = Fct1, y = Value, comp_group = interaction(Fct1, Fct2, sep = " "))) +
+  ggplot(aes(x = Fct1, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Fct2), color = "black", position = position_dodge(width = 0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se", aes(group = Fct2), position = position_dodge(width = 0.8), width = 0.4) +
   geom_point(aes(group = Fct2), size = 1, position = position_dodge(0.8)) +
@@ -418,7 +419,7 @@ p <- df_data %>%
   facet_wrap(~Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-df_annot_tbl <- get_annotation_df(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.5)
+df_annot_tbl <- get_annotation_df(p, df_stat, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.5)
 head(df_annot_tbl)
 ```
 
