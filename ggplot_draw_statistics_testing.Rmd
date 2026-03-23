@@ -89,7 +89,6 @@ theme_yuan <- function(baseFontSize = 8, baseLineWidth = 0.5) {
 
 `draw_stat` adds statistical comparison annotations (bracket + label) to ggplot bar/point/errorbar plots by extracting coordinates from the built ggplot object. Key features:
 
-- **No special aesthetic required**: group positions are resolved from `contrast_vars` — the column names in the plot data that define the contrast groups — eliminating the need for a `comp_group` mapping in `aes()`.
 - Works with single or grouped x-axis variables.
 - Supports `facet_wrap` and `facet_grid`, including **multiple facet variables**.
 - Input validation with informative error messages.
@@ -235,7 +234,7 @@ df_stat <- df_stat %>%
 
 # **Plots**
 
-## Single panel, x == group
+## Single panel, x = group
 
 In a simple experiment, we may only have one grouping variable, such as `Treatment` with different levels. For such experimental designs, we can simply use `x = Treatment`. Let's pretend the interaction of Fct1 and Fct2 is the treatment variable. 
 
@@ -265,11 +264,11 @@ p <- df_data %>%
   scale_fill_brewer(palette = "Set1") +
   theme_yuan()
 
-draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05)
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
 
-Note that the coordinates for segments and labels are calculated based on a main geom or stat layer declared by `main_geom_idx`, which contains the exact x position of an individual group. If there are a range of x values for data in the same group (e.g., jittered points), specify the appropriate layer index.
+Note that the coordinates for segments and labels are calculated based on a main geom or stat layer declared by `main_geom_idx`, which contains the exact x position of an individual group. If there are a range of x values for data in the same group (e.g., jittered points), the user had to specify the appropriate layer index in previous versions of the function. This no longer seems to be necessary with explicitly declaring `contrast_vars`. `main_geom_idx` may be removed in future updates. 
 
 ```{r fig.width=4, fig.height=2.5, out.width=glue("{4*96}px")}
 p <- df_data %>%
@@ -282,7 +281,7 @@ p <- df_data %>%
   scale_fill_brewer(palette = "Set1") +
   theme_yuan()
 
-draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05, main_geom_idx = 3)
+draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1, main_geom_idx = 3)
 ```
 
 
@@ -304,7 +303,7 @@ p <- df_data %>%
 draw_stat(p, df_stat %>% filter(Fct3 == levels(Fct3)[1]), contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
-## Multiple panels, x == group
+## Multiple panels, x = group
 
 Now let's add multiple panels. Here, we use Fct3 as the facet variable. Think of it as measuring different mRNA expression with the same experimental groups. 
 
@@ -318,7 +317,7 @@ p <- df_data %>%
   facet_wrap(~Fct3, scale = "free", strip.position = "left") +
   theme_yuan()
 
-draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.05)
+draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"), ypad_ratio = 0.1)
 ```
 
 
@@ -401,7 +400,7 @@ p <- df_data %>%
   theme_yuan()
 
 draw_stat(p, df_stat, contrast_vars = c("Fct1", "Fct2"),
-          segment_linewidth = 0.3, label_size = 4, label_color = "red")
+          segment_linewidth = 0.3, label_size = 20, label_color = "red")
 ```
 
 
@@ -439,8 +438,6 @@ p +
 
 # **Known Limitations**
 
-- **Jittered layers as `main_geom_idx`**: If a jittered geom (e.g., `geom_jitter`, `geom_quasirandom`) is used as the main reference layer, the x-coordinates are non-deterministic. Use a deterministic layer (e.g., `stat_summary` with `geom = "col"`) as the reference instead.
-- **Jittered points higher than the ymax of segements**: Similar to the above, the group's x-coordinates cannot be determined, while the other geoms (e.g. geom_col and geom_errorbar) have lower y coordinates. A workaround is to add an invisible geom (e.g., `stat_summary(geom = "point", fun = "max", shape = ".", color = NA)`), which serves as anchor points for ymax calculation. 
 - **Many overlapping comparisons**: With a large number of significant pairwise comparisons, annotations can stack high above the data. Consider filtering `contrast_df` to the most relevant comparisons.
 - **`scales = "free_x"` with facets**: If x-axis scales differ across panels, the shared x-coordinate lookup may produce incorrect results. This is uncommon for typical grouped bar plots.
 

@@ -529,7 +529,8 @@ get_annotation_df <- function(p, contrast_df, contrast_vars, sep = " ",
 draw_stat <- function(p, contrast_df, contrast_vars, sep = " ",
                       main_geom_idx = 1,
                       ypad_ratio = 0.05, tolerance = 0.1,
-                      segment_linewidth = 0.4, label_size = 5, label_color = "black") {
+                      segment_linewidth = 0.4, label_size = 12, label_color = "black", 
+                      label_hjust = 0.5, label_vjust = 0.5) {
   df_stat_annot <- get_annotation_df(
     p, contrast_df,
     contrast_vars = contrast_vars,
@@ -538,12 +539,12 @@ draw_stat <- function(p, contrast_df, contrast_vars, sep = " ",
     ypad_ratio = ypad_ratio,
     tolerance = tolerance
   )
-
+  
   if (nrow(df_stat_annot) == 0) {
     message("No annotations to draw.")
     return(p)
   }
-
+  
   p +
     geom_segment(
       data = df_stat_annot,
@@ -563,6 +564,7 @@ draw_stat <- function(p, contrast_df, contrast_vars, sep = " ",
     geom_text(
       data = df_stat_annot,
       aes(x = mid.x_adj, y = ymax_adj, label = Label),
-      size = label_size, color = label_color, hjust = 0.5, vjust = -0.5, inherit.aes = FALSE
+      size = label_size, size.unit = "pt", color = label_color, 
+      hjust = label_hjust, vjust = label_vjust, inherit.aes = FALSE
     )
 }
