@@ -6,14 +6,15 @@ Add GraphPad-style statistical annotation brackets to ggplot2 plots programmatic
 
 ## Features
 
+- **No special aesthetic required** — group positions are resolved from `contrast_vars` (column names in the plot data), eliminating the need for a custom `comp_group` mapping in `aes()`.
 - **Automatic coordinate extraction** via `ggplot_build()` — bracket endpoints are derived from the plot's internal geometry, not hard-coded.
+- **Jitter-aware** — correctly handles jittered and beeswarm layers (e.g., `geom_jitter`, `ggbeeswarm::geom_quasirandom`) when computing bracket heights.
 - **Facet support** — works with `facet_wrap` and `facet_grid`, including **multiple facet variables** (e.g., `facet_wrap(~A + B)`, `facet_grid(A ~ B)`). Also supports subclasses like `ggh4x::facet_wrap2` and `facet_grid2`.
 - **Per-panel y-range** — vertical padding is computed from actual built data per panel, not from shared axis scales.
 - **Bracket stacking** — overlapping comparisons are detected and stacked vertically with configurable padding.
 - **Label nudging** — midpoint labels are shifted to avoid crossing vertical bracket lines.
-- **Flexible group mapping** — supports both simple (`x = Treatment`) and interaction-based (`x = Fct1`, `group = Fct2`) designs via a custom `comp_group` aesthetic.
-- **Input validation** — checks for required columns, valid aesthetic mappings, and layer index range with informative error messages.
-- **Customizable appearance** — `segment_linewidth`, `label_size`, and `label_color` arguments for quick styling.
+- **Input validation** — checks for required columns, valid `contrast_vars`, and layer index range with informative error messages.
+- **Customizable appearance** — `segment_linewidth`, `label_size`, `label_color`, `label_hjust`, and `label_vjust` arguments for quick styling.
 
 ## Installation
 
@@ -29,13 +30,13 @@ source("ggplot_draw_stat.R")
 
 ## Full Vignette
 
-Check ggplot_draw_statistics_testing.Rmd or the rendered ggplot_draw_statistics_testing.html. 
+Check ggplot_draw_statistics_testing.Rmd or the rendered ggplot_draw_statistics_testing.html.
 
 ## Quick Start
 
 ### 1. Prepare a contrast dataframe
 
-The contrast dataframe must have columns `Group1`, `Group2`, and `Label`. Group names must match the values of the aesthetic mapped to `comp_group` in your ggplot call.
+The contrast dataframe must have columns `Group1`, `Group2`, and `Label`. Group names must match the values produced by `paste(contrast_vars, collapse = sep)` — i.e., the same labels that would result from `interaction(contrast_vars, sep = sep)`.
 
 ```r
 df_stat <- data.frame(
@@ -45,41 +46,38 @@ df_stat <- data.frame(
 )
 ```
 
-### 2. Map `comp_group` in your ggplot
-
-Pass a `comp_group` aesthetic (or any custom name via `contrast_group_name`) that identifies each comparison group:
+### 2. Build your ggplot (no special aesthetic needed)
 
 ```r
-p <- ggplot(df, aes(x = Treatment, y = Value, comp_group = Treatment)) +
+p <- ggplot(df, aes(x = Treatment, y = Value)) +
   stat_summary(geom = "col", fun = "mean", fill = "steelblue") +
   stat_summary(geom = "errorbar", fun.data = "mean_se", width = 0.3)
 ```
 
 ### 3. Draw annotations
 
+Pass `contrast_vars` — the column name(s) in the plot data that define the contrast groups:
+
 ```r
-draw_stat(p, df_stat, contrast_group_name = "comp_group")
+draw_stat(p, df_stat, contrast_vars = "Treatment")
 ```
 
 ## Usage with Interaction Groups
 
-When your design has two factors (e.g., Treatment × Genotype), use `interaction()` to create composite group labels:
+When your design has two factors (e.g., Treatment × Genotype), pass both column names as `contrast_vars`:
 
 ```r
-p <- ggplot(df, aes(
-  x = Treatment, y = Value,
-  comp_group = interaction(Treatment, Genotype, sep = " ")
-)) +
+p <- ggplot(df, aes(x = Treatment, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Genotype),
                position = position_dodge(0.8), width = 0.6) +
   stat_summary(geom = "errorbar", fun.data = "mean_se",
                aes(group = Genotype),
                position = position_dodge(0.8), width = 0.4)
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group")
+draw_stat(p, df_stat, contrast_vars = c("Treatment", "Genotype"))
 ```
 
-Ensure that `Group1` and `Group2` in your contrast dataframe use the same separator and level ordering as `interaction()`.
+Ensure that `Group1` and `Group2` in your contrast dataframe use the same separator (default `" "`) and level ordering as `paste(Treatment, Genotype)`.
 
 ## Usage with Facets
 
@@ -89,13 +87,12 @@ For faceted plots, include the facet variable column(s) in your contrast datafra
 
 ```r
 # df_stat must contain a "Measurement" column matching the facet variable
-p <- ggplot(df, aes(x = Treatment, y = Value,
-                     comp_group = interaction(Treatment, Genotype, sep = " "))) +
+p <- ggplot(df, aes(x = Treatment, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Genotype),
                position = position_dodge(0.8), width = 0.6) +
   facet_wrap(~Measurement, scales = "free")
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group")
+draw_stat(p, df_stat, contrast_vars = c("Treatment", "Genotype"))
 ```
 
 ### Multiple facet variables
@@ -104,13 +101,12 @@ When using `facet_wrap(~A + B)` or `facet_grid(A ~ B)`, `contrast_df` must conta
 
 ```r
 # df_stat must contain both "Genotype" and "Measurement" columns
-p <- ggplot(df, aes(x = Treatment, y = Value,
-                     comp_group = interaction(Treatment, Genotype, sep = " "))) +
+p <- ggplot(df, aes(x = Treatment, y = Value)) +
   stat_summary(geom = "col", fun = "mean", aes(fill = Treatment),
                position = position_dodge(0.8), width = 0.6) +
   facet_wrap(~Genotype + Measurement, scales = "free")
 
-draw_stat(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.1)
+draw_stat(p, df_stat, contrast_vars = c("Treatment", "Genotype"), ypad_ratio = 0.1)
 ```
 
 ## Customizing Appearance
@@ -118,8 +114,8 @@ draw_stat(p, df_stat, contrast_group_name = "comp_group", ypad_ratio = 0.1)
 `draw_stat` exposes styling arguments directly:
 
 ```r
-draw_stat(p, df_stat, contrast_group_name = "comp_group",
-          segment_linewidth = 0.3, label_size = 4, label_color = "red")
+draw_stat(p, df_stat, contrast_vars = c("Treatment", "Genotype"),
+          segment_linewidth = 0.3, label_size = 20, label_color = "red")
 ```
 
 For full control over annotation layers (e.g., custom label formatting, `coord_cartesian(clip = "off")`), use `get_annotation_df()` directly — see [Advanced Usage](#advanced-usage) below.
@@ -134,24 +130,27 @@ Wrapper that computes annotation coordinates and adds bracket + label layers to 
 |---|---|---|---|
 | `p` | ggplot | — | A ggplot object |
 | `contrast_df` | data.frame | — | Must have `Group1`, `Group2`, `Label`; faceted plots also require the facet variable column(s) |
+| `contrast_vars` | character | — | Column name(s) in `p$data` that define the contrast groups |
+| `sep` | character | `" "` | Separator used when pasting `contrast_vars` to build group labels |
 | `main_geom_idx` | integer | `1` | Index of the geom/stat layer used to extract x-positions |
-| `contrast_group_name` | character | — | Name of the aesthetic mapping that stores group identifiers |
 | `ypad_ratio` | numeric | `0.05` | Vertical padding between brackets as a fraction of per-panel y-range |
 | `tolerance` | numeric | `0.1` | Floating-point tolerance for coordinate matching |
 | `segment_linewidth` | numeric | `0.4` | Line width of bracket segments |
-| `label_size` | numeric | `5` | Text size of annotation labels |
+| `label_size` | numeric | `12` | Text size of annotation labels (in pt) |
 | `label_color` | character | `"black"` | Color for both segments and labels |
+| `label_hjust` | numeric | `0.5` | Horizontal justification of annotation labels |
+| `label_vjust` | numeric | `0.5` | Vertical justification of annotation labels |
 
 ### `get_annotation_df()`
 
-Lower-level function that returns the annotation dataframe without drawing. Accepts the same arguments as `draw_stat()` except the three styling arguments.
+Lower-level function that returns the annotation dataframe without drawing. Accepts the same arguments as `draw_stat()` except the styling arguments (`segment_linewidth`, `label_size`, `label_color`, `label_hjust`, `label_vjust`).
 
 ## Advanced Usage
 
 Use `get_annotation_df()` for custom rendering — for example, displaying p-values instead of asterisks, or rendering annotations above the panel boundary:
 
 ```r
-df_annot <- get_annotation_df(p, df_stat, contrast_group_name = "comp_group",
+df_annot <- get_annotation_df(p, df_stat, contrast_vars = c("Treatment", "Genotype"),
                                ypad_ratio = 0.5)
 
 segment_x_pad <- 0.02
@@ -189,8 +188,6 @@ p +
 
 ## Known Limitations
 
-- **Jittered layers as `main_geom_idx`** — If a jittered geom (e.g., `geom_jitter`, `geom_quasirandom`) is used as the main reference layer, x-coordinates are non-deterministic. Use a deterministic layer (e.g., `stat_summary` with `geom = "col"`) via `main_geom_idx`.
-- **Jittered points exceeding ymax** — When jittered points extend above summary geoms, bracket heights may be too low. A workaround is to add an invisible anchor layer: `stat_summary(geom = "point", fun = "max", shape = ".", color = NA)`.
 - **Many overlapping comparisons** — With many significant pairwise comparisons, annotations can stack high above the data. Consider filtering `contrast_df` to the most relevant comparisons.
 - **`scales = "free_x"` with facets** — If x-axis scales differ across panels, the shared x-coordinate lookup may produce incorrect results. This is uncommon for typical grouped bar plots.
 
