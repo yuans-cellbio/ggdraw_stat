@@ -1,12 +1,22 @@
 .ds_style <- function(ypad_ratio, segment_linewidth, label_size, label_color,
                       label_hjust, label_vjust, label_family, label_fontface,
-                      label_lineheight, clearance_mm) {
+                      label_lineheight, clearance_mm, bracket_gap_mm = NULL,
+                      label_position = "auto", short_legs = FALSE) {
   positive <- list(segment_linewidth = segment_linewidth, label_size = label_size,
-    label_lineheight = label_lineheight, clearance_mm = clearance_mm)
+    label_lineheight = label_lineheight)
   for (name in names(positive)) {
     value <- positive[[name]]
     if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value <= 0) .ds_stop(name, " must be a positive finite number.")
   }
+  for (name in c("clearance_mm", "bracket_gap_mm")) {
+    value <- get(name)
+    if (is.null(value) && name == "bracket_gap_mm") next
+    if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < 0)
+      .ds_stop(name, " must be a nonnegative finite number.")
+  }
+  label_position <- match.arg(label_position, c("auto", "left"))
+  if (!is.logical(short_legs) || length(short_legs) != 1 || is.na(short_legs))
+    .ds_stop("short_legs must be TRUE or FALSE.")
   if (!is.null(ypad_ratio) && (!is.numeric(ypad_ratio) || length(ypad_ratio) != 1 || !is.finite(ypad_ratio) || ypad_ratio < 0)) .ds_stop("ypad_ratio must be NULL or a nonnegative finite number.")
   for (value in list(label_hjust, label_vjust)) {
     if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < 0 || value > 1) .ds_stop("Label justification must be between 0 and 1.")
@@ -14,7 +24,9 @@
   list(ypad_ratio = ypad_ratio, segment_linewidth = segment_linewidth, label_size = label_size,
     label_color = label_color, label_hjust = label_hjust, label_vjust = label_vjust,
     label_family = label_family, label_fontface = label_fontface,
-    label_lineheight = label_lineheight, clearance_mm = clearance_mm)
+    label_lineheight = label_lineheight, clearance_mm = clearance_mm,
+    bracket_gap_mm = bracket_gap_mm, label_position = label_position,
+    short_legs = short_legs)
 }
 
 #' Add long-leg comparison brackets to a ggplot.
@@ -25,11 +37,13 @@ draw_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
                       segment_linewidth = 0.4, label_size = 12, label_color = "black",
                       label_hjust = 0.5, label_vjust = 0.5,
                       clearance_layers = NULL, geometry = NULL, clearance_mm = 0.8,
-                      label_family = NULL, label_fontface = "plain", label_lineheight = 1.2) {
+                      label_family = NULL, label_fontface = "plain", label_lineheight = 1.2,
+                      bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE) {
   if (inherits(p, "draw_stat_plot")) .ds_stop("This plot already has draw_stat annotations. Combine comparisons in one contrast_df.")
   config <- .ds_prepare(p, contrast_df, contrast_vars, main_geom_idx, clearance_layers, geometry)
   style <- .ds_style(ypad_ratio, segment_linewidth, label_size, label_color,
-    label_hjust, label_vjust, label_family, label_fontface, label_lineheight, clearance_mm)
+    label_hjust, label_vjust, label_family, label_fontface, label_lineheight, clearance_mm,
+    bracket_gap_mm, label_position, short_legs)
   attr(p, "draw_stat_spec") <- list(comparisons = contrast_df,
     contrast_vars = config$contrast_vars, main_geom_idx = main_geom_idx,
     clearance_layers = clearance_layers, geometry = geometry, sep = sep, style = style)
@@ -47,7 +61,8 @@ inspect_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
                          output_size = NULL, device = c("pdf", "png", "current"),
                          label_size = 12, label_family = NULL, label_fontface = "plain",
                          label_lineheight = 1.2, clearance_mm = 0.8,
-                         segment_linewidth = 0.4, label_hjust = 0.5, label_vjust = 0.5) {
+                         segment_linewidth = 0.4, label_hjust = 0.5, label_vjust = 0.5,
+                         bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE) {
   device <- match.arg(device)
   if (inherits(p, "draw_stat_plot")) p <- .ds_strip(p)
   context <- if (device == "current") "current device" else if (is.null(output_size)) "estimate: 7 x 7 inch PDF/PNG" else paste(output_size, collapse = " x ")
@@ -64,7 +79,8 @@ inspect_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
   }
   config <- .ds_prepare(p, contrast_df, contrast_vars, main_geom_idx, clearance_layers, geometry)
   style <- .ds_style(ypad_ratio, segment_linewidth, label_size, "black", label_hjust,
-    label_vjust, label_family, label_fontface, label_lineheight, clearance_mm)
+    label_vjust, label_family, label_fontface, label_lineheight, clearance_mm,
+    bracket_gap_mm, label_position, short_legs)
   model <- .ds_model(p, contrast_df, config, sep, geometry)
   resolved <- .ds_render_model(model, style)
   attr(resolved$annotations, "layout_context") <- context
@@ -95,3 +111,4 @@ nudge_y <- function(x, pad) {
   x
 }
 safe_max <- function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_
+

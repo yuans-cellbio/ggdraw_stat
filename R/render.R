@@ -92,7 +92,14 @@
   }
   # Freeze the resolved coordinate mapping. No extra builds or random position
   # adjustments occur during fitting, so jitter and statistics are unchanged.
-  for (i in seq_along(ranges)) pb$layout$panel_params[[i]] <- .ds_set_y_range(original[[i]], ranges[[i]])
+  for (i in seq_along(ranges)) {
+    panel <- .ds_set_y_range(original[[i]], ranges[[i]])
+    # Axis guide positions were trained before headroom fitting. Refresh only
+    # those guides with the resolved mapping; do not rebuild data/stat layers.
+    if (!is.null(panel$guides)) panel <- pb$layout$coord$train_panel_guides(
+      panel, pb$plot$layers, pb$layout$coord_params)
+    pb$layout$panel_params[[i]] <- panel
+  }
   context <- new.env(parent = emptyenv())
   context$annotations <- result
   annotation_data <- panels[c("PANEL", model$config$facets)]
@@ -114,21 +121,61 @@
   attr(pb, "draw_stat_annotations") <- result
   list(built = pb, annotations = result, model = model)
 }
+# Mask horizontal bars behind label rectangles. Keep both vertical arms intact:
+# a wide label can otherwise erase the entire short arm of its own comparison.
+.ds_bracket_segments <- function(rows, panel_params, coord, style) {
+  transform <- function(x, y) coord$transform(data.frame(x = x, y = y), panel_params)
+  n <- nrow(rows)
+  start <- transform(c(rows$Group1.x, rows$Group1.x, rows$Group2.x),
+    c(rows$ymax_adj, rows$Group1.y_adj, rows$Group2.y_adj))
+  end <- transform(c(rows$Group2.x, rows$Group1.x, rows$Group2.x), rep(rows$ymax_adj, 3))
+  parts <- rep(c("bar", "left", "right"), each = n)
+  ids <- rep(seq_len(n), 3)
+  mask <- identical(style$label_position, "left")
+  if (mask) {
+    lo <- transform(rows$label.xmin, rows$label.ymin)
+    hi <- transform(rows$label.xmax, rows$label.ymax)
+    boxes <- data.frame(left = pmin(lo$x, hi$x) - .002, right = pmax(lo$x, hi$x) + .002,
+      bottom = pmin(lo$y, hi$y) - .002, top = pmax(lo$y, hi$y) + .002)
+  }
+  segments <- list()
+  for (i in seq_len(nrow(start))) {
+    if (parts[i] != "bar") {
+      segments[[length(segments) + 1L]] <- data.frame(x = start$x[i], y = start$y[i],
+        xend = end$x[i], yend = end$y[i], comparison = ids[i], part = parts[i])
+      next
+    }
+    pieces <- list(sort(c(start$x[i], end$x[i])))
+    if (mask) for (j in seq_len(nrow(boxes))) {
+      box <- boxes[j, ]
+      if (start$y[i] < box$bottom || start$y[i] > box$top) next
+      cut <- c(box$left, box$right)
+      pieces <- unlist(lapply(pieces, function(v) {
+        out <- list()
+        if (v[1] < min(v[2], cut[1])) out <- c(out, list(c(v[1], min(v[2], cut[1]))))
+        if (max(v[1], cut[2]) < v[2]) out <- c(out, list(c(max(v[1], cut[2]), v[2])))
+        out
+      }), recursive = FALSE)
+    }
+    for (piece in pieces) segments[[length(segments) + 1L]] <- data.frame(x = piece[1],
+      y = start$y[i], xend = piece[2], yend = end$y[i], comparison = ids[i], part = parts[i])
+  }
+  if (!length(segments)) return(data.frame(x = numeric(), y = numeric(), xend = numeric(),
+    yend = numeric(), comparison = integer(), part = character()))
+  do.call(rbind, segments)
+}
+
 .ds_geom <- function() ggplot2::ggproto("GeomDrawStat", ggplot2::Geom,
   required_aes = character(), default_aes = ggplot2::aes(),
   draw_key = ggplot2::draw_key_blank,
   draw_panel = function(data, panel_params, coord, context, style) {
     rows <- context$annotations[context$annotations$PANEL == as.integer(data$PANEL[1]), , drop = FALSE]
-    if (!nrow(rows)) return(grid::zeroGrob())
+    if (!nrow(rows)) return(grid::nullGrob())
     transform <- function(x, y) coord$transform(data.frame(x = x, y = y), panel_params)
-    x0 <- c(rows$Group1.x, rows$Group1.x, rows$Group2.x)
-    y0 <- c(rows$ymax_adj, rows$Group1.y_adj, rows$Group2.y_adj)
-    x1 <- c(rows$Group2.x, rows$Group1.x, rows$Group2.x)
-    y1 <- rep(rows$ymax_adj, 3)
-    start <- transform(x0, y0); end <- transform(x1, y1)
+    segments <- .ds_bracket_segments(rows, panel_params, coord, style)
     text <- transform(rows$label.x, rows$label.y)
     grid::grobTree(
-      grid::segmentsGrob(start$x, start$y, end$x, end$y, default.units = "npc",
+      grid::segmentsGrob(segments$x, segments$y, segments$xend, segments$yend, default.units = "npc",
         gp = grid::gpar(col = style$label_color, lwd = style$segment_linewidth * 72.27 / 25.4, lineend = "butt")),
       grid::textGrob(as.character(rows$Label), x = text$x, y = text$y, default.units = "npc",
         hjust = style$label_hjust, vjust = style$label_vjust,
@@ -142,3 +189,4 @@ ggplot_build.draw_stat_plot <- function(plot, ...) {
   model <- .ds_model(p, spec$comparisons, config, spec$sep, spec$geometry)
   .ds_render_model(model, spec$style)$built
 }
+

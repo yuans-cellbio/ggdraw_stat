@@ -20,7 +20,7 @@
     r <- rows[idx, , drop = FALSE]
     left <- min(r$x1, r$x2); right <- max(r$x1, r$x2)
     relevant <- geometry$xmax >= left & geometry$xmin <= right
-    baseline <- max(c(r$a1, r$a2, geometry$top[relevant] + r$pad)) + r$pad + line_mm / 2
+    baseline <- max(c(r$a1, r$a2, geometry$top[relevant] + r$pad)) + line_mm / 2
     if (r$lw + 2 * gap > width) return(NULL)
     min_x <- max(gap + r$lw / 2, left)
     max_x <- min(width - gap - r$lw / 2, right)
@@ -127,6 +127,41 @@
   result <- layouts[[valid[best]]]
   result[order(vapply(result, `[[`, integer(1), "index"))]
 }
+# Explicit row spacing and left-aligned labels use deterministic short-span-first
+# placement. These are physical millimetres, independent of data clearance.
+.ds_bracket_rows <- function(rows, geometry, width, height, gap, line_mm,
+                             left_aligned = FALSE) {
+  if (!nrow(rows)) return(list())
+  placed <- list()
+  text_gap <- 0.4
+  indices <- order(abs(rows$x2 - rows$x1), pmax(rows$a1, rows$a2),
+    pmin(rows$x1, rows$x2), pmax(rows$x1, rows$x2), rows$.comparison)
+  for (idx in indices) {
+    r <- rows[idx, , drop = FALSE]
+    left <- min(r$x1, r$x2); right <- max(r$x1, r$x2)
+    if (r$lw + 2 * text_gap > width)
+      .ds_stop("The label is wider than its panel. Enlarge the panel or reduce label_size.")
+    if (!left_aligned && r$lw + 2 * text_gap > right - left)
+      .ds_stop("The centered label cannot clear the bracket legs. Use label_position='left', shorten the label or enlarge the plot.")
+    lx <- if (left_aligned) max(text_gap, min(left + text_gap, width - text_gap - r$lw))
+      else (left + right - r$lw) / 2
+    rx <- lx + r$lw
+    relevant <- (geometry$xmax >= left & geometry$xmin <= right) |
+      (geometry$xmax >= lx & geometry$xmin <= rx)
+    y <- max(c(r$a1, r$a2, geometry$top[relevant] + r$pad)) + line_mm / 2
+    for (p in placed) {
+      spans <- left <= p$right + line_mm && right >= p$left - line_mm
+      labels <- lx < p$rx + text_gap && rx > p$lx - text_gap
+      if (spans || labels) y <- max(y, p$y + max(gap, p$top - p$y) + line_mm)
+    }
+    bottom <- y + text_gap + line_mm / 2
+    placed[[length(placed) + 1L]] <- list(index = idx, x1 = r$x1, x2 = r$x2,
+      a1 = r$a1, a2 = r$a2, left = left, right = right, y = y,
+      cx = (lx + rx) / 2, lx = lx, rx = rx, bottom = bottom, top = bottom + r$lh)
+  }
+  placed[order(vapply(placed, `[[`, integer(1), "index"))]
+}
+
 .ds_layout_panel <- function(annotations, geometry, range_x, range_y, width, height, style) {
   if (!nrow(annotations)) return(annotations)
   to_x <- function(x) (x - range_x[1]) / diff(range_x) * width
@@ -147,7 +182,11 @@
   r$pad <- max(style$clearance_mm, if (is.null(style$ypad_ratio)) 0 else style$ypad_ratio * data_range / diff(range_y) * height)
   anchor <- function(keys) vapply(keys, function(key) max(g$top[g$key == key]) + r$pad[1], numeric(1))
   r$a1 <- anchor(r$.key1); r$a2 <- anchor(r$.key2)
-  placed <- .ds_compact(r, g, width, height, style$clearance_mm, style$segment_linewidth)
+  if (!is.null(style$bracket_gap_mm) || identical(style$label_position, "left")) {
+    gap <- if (is.null(style$bracket_gap_mm)) style$clearance_mm else style$bracket_gap_mm
+    placed <- .ds_bracket_rows(r, g, width, height, gap, style$segment_linewidth,
+      left_aligned = identical(style$label_position, "left"))
+  } else placed <- .ds_compact(r, g, width, height, style$clearance_mm, style$segment_linewidth)
   for (column in c("ymax", "mid.x", "ymax_adj", "Group1.y_adj", "Group2.y_adj", "mid.x_adj",
                    "label.y", "label.xmin", "label.xmax", "label.ymin", "label.ymax", "ypad")) r[[column]] <- NA_real_
   for (i in seq_along(placed)) {
@@ -155,7 +194,8 @@
     r$ymax[i] <- from_y(max(g$top[g$xmax >= p$left & g$xmin <= p$right]))
     r$mid.x[i] <- mean(c(r$Group1.x[i], r$Group2.x[i]))
     r$ymax_adj[i] <- from_y(p$y)
-    r$Group1.y_adj[i] <- from_y(p$a1); r$Group2.y_adj[i] <- from_y(p$a2)
+    r$Group1.y_adj[i] <- from_y(if (isTRUE(style$short_legs)) max(p$a1, p$y - 2) else p$a1)
+    r$Group2.y_adj[i] <- from_y(if (isTRUE(style$short_legs)) max(p$a2, p$y - 2) else p$a2)
     r$mid.x_adj[i] <- from_x(p$cx)
     r$label.xmin[i] <- from_x(p$lx); r$label.xmax[i] <- from_x(p$rx)
     r$label.ymin[i] <- from_y(p$bottom); r$label.ymax[i] <- from_y(p$top)
@@ -169,3 +209,4 @@
   r[c("x1", "x2", "a1", "a2", "lw", "lh", "pad")] <- NULL
   r
 }
+

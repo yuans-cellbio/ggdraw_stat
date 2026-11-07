@@ -16,6 +16,45 @@ Add GraphPad-style statistical annotation brackets to ggplot2 plots programmatic
 - **Input validation** — checks for required columns, valid `contrast_vars`, and layer index range with informative error messages.
 - **Customizable appearance** — `segment_linewidth`, `label_size`, `label_color`, `label_hjust`, and `label_vjust` arguments for quick styling.
 
+## Physical spacing and long labels
+
+Keep the entry script **and its `R/` directory** together. These options are
+available on `draw_stat()`, `inspect_stat()` and `get_annotation_df()`:
+
+```r
+q <- draw_stat(p, comparisons,
+  clearance_mm = 2,       # Data-to-bracket clearance
+  bracket_gap_mm = 3,     # Minimum vertical distance between bracket rows
+  label_position = "left",
+  short_legs = FALSE)
+```
+
+`bracket_gap_mm` is independent of data clearance. Supplying it selects
+deterministic short-span-first rows: a 3-4 comparison sits below an enclosing
+2-4 comparison. Overlapping spans or label boxes are separated by at least the
+larger of the requested minimum and the measured label height, plus line/text
+clearance. Disjoint comparisons can share a height. All measurements use the
+actual output device; label size and output dimensions still matter.
+
+`label_position = "left"` also selects this row layout and allows long P-value
+labels to extend beyond their bracket spans, within the panel. Horizontal bars
+are masked behind text rectangles. Both vertical arms remain intact, including
+a short right arm covered by a wide label; arms can pass behind label text.
+`short_legs = TRUE` caps each arm at 2 mm while keeping its group x-position.
+
+The defaults `bracket_gap_mm = NULL`, `label_position = "auto"` and
+`short_legs = FALSE` retain the existing compact collision solver and long arms.
+`clearance_mm` now accepts zero; its default remains 0.8 mm. Data clearance is
+applied once. Facet panels without comparisons draw an empty grob correctly.
+After headroom fitting, axis guides are refreshed against the resolved coordinate
+range so tick labels remain aligned with the data. Statistical layers and random
+position adjustments are not rerun during that refresh.
+
+Run the focused regressions with `Rscript tests/check-brackets.R`. They cover
+physical spacing, label-height floors, span ordering, independent data clearance,
+long-label arm preservation, empty facets and native PDF/PNG saving. An optional
+directory argument retains the generated figures and check report.
+
 ## Installation
 
 No package installation required. Source the script directly:
@@ -194,3 +233,4 @@ p +
 ## License
 
 MIT
+
