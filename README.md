@@ -26,7 +26,8 @@ q <- draw_stat(p, comparisons,
   clearance_mm = 2,       # Data-to-bracket clearance
   bracket_gap_mm = 3,     # Minimum vertical distance between bracket rows
   label_position = "left",
-  short_legs = FALSE)
+  short_legs = FALSE,
+  min_arm_mm = 1)
 ```
 
 `bracket_gap_mm` is independent of data clearance. Supplying it selects
@@ -40,7 +41,15 @@ actual output device; label size and output dimensions still matter.
 labels to extend beyond their bracket spans, within the panel. Horizontal bars
 are masked behind text rectangles. Both vertical arms remain intact, including
 a short right arm covered by a wide label; arms can pass behind label text.
-`short_legs = TRUE` caps each arm at 2 mm while keeping its group x-position.
+`short_legs = TRUE` normally caps each arm at 2 mm while keeping its group
+x-position. `min_arm_mm` takes precedence when it requires a longer arm.
+
+`min_arm_mm = 1` gives both arms at least 1 mm of visible extension below the
+horizontal stroke. The crossbar is raised as needed while preserving data
+clearance. Stroke thickness is included in the height calculation. The option
+applies to explicit-row and compact layouts; its default is zero to retain
+existing layouts. A larger requested minimum can require more panel headroom.
+Run `Rscript tests/check-minimum-arms.R` for 38 physical minimum/clearance/cap cases.
 
 The defaults `bracket_gap_mm = NULL`, `label_position = "auto"` and
 `short_legs = FALSE` retain the existing compact collision solver and long arms.

@@ -1,14 +1,14 @@
 .ds_style <- function(ypad_ratio, segment_linewidth, label_size, label_color,
                       label_hjust, label_vjust, label_family, label_fontface,
                       label_lineheight, clearance_mm, bracket_gap_mm = NULL,
-                      label_position = "auto", short_legs = FALSE) {
+                      label_position = "auto", short_legs = FALSE, min_arm_mm = 0) {
   positive <- list(segment_linewidth = segment_linewidth, label_size = label_size,
     label_lineheight = label_lineheight)
   for (name in names(positive)) {
     value <- positive[[name]]
     if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value <= 0) .ds_stop(name, " must be a positive finite number.")
   }
-  for (name in c("clearance_mm", "bracket_gap_mm")) {
+  for (name in c("clearance_mm", "bracket_gap_mm", "min_arm_mm")) {
     value <- get(name)
     if (is.null(value) && name == "bracket_gap_mm") next
     if (!is.numeric(value) || length(value) != 1 || !is.finite(value) || value < 0)
@@ -26,7 +26,7 @@
     label_family = label_family, label_fontface = label_fontface,
     label_lineheight = label_lineheight, clearance_mm = clearance_mm,
     bracket_gap_mm = bracket_gap_mm, label_position = label_position,
-    short_legs = short_legs)
+    short_legs = short_legs, min_arm_mm = min_arm_mm)
 }
 
 #' Add long-leg comparison brackets to a ggplot.
@@ -38,12 +38,12 @@ draw_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
                       label_hjust = 0.5, label_vjust = 0.5,
                       clearance_layers = NULL, geometry = NULL, clearance_mm = 0.8,
                       label_family = NULL, label_fontface = "plain", label_lineheight = 1.2,
-                      bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE) {
+                      bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE, min_arm_mm = 0) {
   if (inherits(p, "draw_stat_plot")) .ds_stop("This plot already has draw_stat annotations. Combine comparisons in one contrast_df.")
   config <- .ds_prepare(p, contrast_df, contrast_vars, main_geom_idx, clearance_layers, geometry)
   style <- .ds_style(ypad_ratio, segment_linewidth, label_size, label_color,
     label_hjust, label_vjust, label_family, label_fontface, label_lineheight, clearance_mm,
-    bracket_gap_mm, label_position, short_legs)
+    bracket_gap_mm, label_position, short_legs, min_arm_mm)
   attr(p, "draw_stat_spec") <- list(comparisons = contrast_df,
     contrast_vars = config$contrast_vars, main_geom_idx = main_geom_idx,
     clearance_layers = clearance_layers, geometry = geometry, sep = sep, style = style)
@@ -62,7 +62,7 @@ inspect_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
                          label_size = 12, label_family = NULL, label_fontface = "plain",
                          label_lineheight = 1.2, clearance_mm = 0.8,
                          segment_linewidth = 0.4, label_hjust = 0.5, label_vjust = 0.5,
-                         bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE) {
+                         bracket_gap_mm = NULL, label_position = "auto", short_legs = FALSE, min_arm_mm = 0) {
   device <- match.arg(device)
   if (inherits(p, "draw_stat_plot")) p <- .ds_strip(p)
   context <- if (device == "current") "current device" else if (is.null(output_size)) "estimate: 7 x 7 inch PDF/PNG" else paste(output_size, collapse = " x ")
@@ -80,7 +80,7 @@ inspect_stat <- function(p, contrast_df, contrast_vars = NULL, sep = " ",
   config <- .ds_prepare(p, contrast_df, contrast_vars, main_geom_idx, clearance_layers, geometry)
   style <- .ds_style(ypad_ratio, segment_linewidth, label_size, "black", label_hjust,
     label_vjust, label_family, label_fontface, label_lineheight, clearance_mm,
-    bracket_gap_mm, label_position, short_legs)
+    bracket_gap_mm, label_position, short_legs, min_arm_mm)
   model <- .ds_model(p, contrast_df, config, sep, geometry)
   resolved <- .ds_render_model(model, style)
   attr(resolved$annotations, "layout_context") <- context
